@@ -241,6 +241,8 @@ class StudentDashboard extends StatefulWidget {
 }
 
 class _StudentDashboardState extends State<StudentDashboard> {
+  bool _hasMarkedAttendance = false;
+
   String _statusMessage = '';
   int _timeRemaining = 300; // 5 minutes in seconds
   Timer? _timer;
@@ -252,7 +254,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
     _listenForAttendanceTrigger();
   }
 
-  void _listenForAttendanceTrigger() {
+ void _listenForAttendanceTrigger() {
   Timer.periodic(Duration(seconds: 1), (timer) async {
     final response = await http.get(Uri.parse('http://172.21.44.180:5000/attendance-status'));
     if (response.statusCode == 200) {
@@ -260,16 +262,14 @@ class _StudentDashboardState extends State<StudentDashboard> {
       setState(() {
         _isAttendanceActive = data['isActive'];
         _timeRemaining = data['timeRemaining'];
-
-        // Stop local timer when server marks attendance as inactive
-        if (!_isAttendanceActive && _timer != null) {
-          _timer?.cancel();
-          _timer = null;
+        if (!_isAttendanceActive) {
+          _hasMarkedAttendance = false; // Reset for next session
         }
       });
     }
   });
 }
+
 
 
   void _startCountdownTimer() {
@@ -291,8 +291,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
 
 
-  void _markAttendance() async {
-  if (_isAttendanceActive) {
+ void _markAttendance() async {
+  if (_isAttendanceActive && !_hasMarkedAttendance) {
     final response = await http.post(
       Uri.parse('http://172.21.44.180:5000/attendance'),
       headers: {'Content-Type': 'application/json'},
@@ -302,13 +302,15 @@ class _StudentDashboardState extends State<StudentDashboard> {
     if (response.statusCode == 200) {
       setState(() {
         _statusMessage = 'Thank you, your attendance has been registered.';
+        _hasMarkedAttendance = true; // Disable further submissions
       });
     } else {
       setState(() {
-        _statusMessage = 'Failed to mark attendance. Error: ${response.body}';
+        final errorData = jsonDecode(response.body);
+        _statusMessage = 'Failed to mark attendance. ${errorData['message']}';
       });
     }
-  } else {
+  } else if (!_isAttendanceActive) {
     setState(() {
       _statusMessage = 'Attendance marking is not active at the moment.';
     });
