@@ -1,6 +1,10 @@
+
+
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async';
 
 void main() {
   runApp(MyApp());
@@ -20,6 +24,8 @@ class MyApp extends StatelessWidget {
   }
 }
 
+enum UserRole { student, admin }
+
 class LoginPage extends StatefulWidget {
   @override
   _LoginPageState createState() => _LoginPageState();
@@ -29,16 +35,19 @@ class _LoginPageState extends State<LoginPage> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   String _errorMessage = '';
+  UserRole _selectedRole = UserRole.student;
 
   void _login() async {
     final username = _usernameController.text.toLowerCase();
     final password = _passwordController.text;
 
     if (password == '1234' && (username == 'john' || username == 'jane' || username == 'alice' || username == 'bob')) {
-      Navigator.push(
+      Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => DashboardPage(username: username),
+          builder: (context) => _selectedRole == UserRole.student
+              ? StudentDashboard(username: username)
+              : AdminDashboard(username: username),
         ),
       );
     } else {
@@ -69,8 +78,11 @@ class _LoginPageState extends State<LoginPage> {
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children:  [
-                Text('Attendance Management System',style: TextStyle(fontSize:20,fontWeight: FontWeight.bold,color: Colors.blueAccent,),textAlign: TextAlign.center,
+              children: [
+                Text(
+                  'Attendance Management System',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+                  textAlign: TextAlign.center,
                 ),
                 SizedBox(height: 20),
                 ClipRRect(
@@ -81,9 +93,7 @@ class _LoginPageState extends State<LoginPage> {
                     height: 200,
                     fit: BoxFit.contain,
                     loadingBuilder: (BuildContext context, Widget child, ImageChunkEvent? loadingProgress) {
-                      if (loadingProgress == null) {
-                        return child;
-                      }
+                      if (loadingProgress == null) return child;
                       return Center(
                         child: CircularProgressIndicator(
                           value: loadingProgress.expectedTotalBytes != null
@@ -97,10 +107,7 @@ class _LoginPageState extends State<LoginPage> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.error, color: Colors.red, size: 50),
-                          Text(
-                            'Failed to load logo',
-                            style: TextStyle(color: Colors.red),
-                          ),
+                          Text('Failed to load logo', style: TextStyle(color: Colors.red)),
                         ],
                       );
                     },
@@ -121,6 +128,8 @@ class _LoginPageState extends State<LoginPage> {
                   isPassword: true,
                   controller: _passwordController,
                 ),
+                SizedBox(height: 16),
+                _buildRoleSelector(),
                 SizedBox(height: 32),
                 ElevatedButton(
                   onPressed: _login,
@@ -136,15 +145,8 @@ class _LoginPageState extends State<LoginPage> {
                 if (_errorMessage.isNotEmpty)
                   Padding(
                     padding: EdgeInsets.only(top: 20),
-                    child: Text(
-                      _errorMessage,
-                      style: TextStyle(color: Colors.red),
-                    ),
+                    child: Text(_errorMessage, style: TextStyle(color: Colors.red)),
                   ),
-                SizedBox(height: 32),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                ),
               ],
             ),
           ),
@@ -199,23 +201,100 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+
+  Widget _buildRoleSelector() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Radio(
+          value: UserRole.student,
+          groupValue: _selectedRole,
+          onChanged: (UserRole? value) {
+            setState(() {
+              _selectedRole = value!;
+            });
+          },
+        ),
+        Text('Student'),
+        Radio(
+          value: UserRole.admin,
+          groupValue: _selectedRole,
+          onChanged: (UserRole? value) {
+            setState(() {
+              _selectedRole = value!;
+            });
+          },
+        ),
+        Text('Admin'),
+      ],
+    );
+  }
 }
 
-class DashboardPage extends StatefulWidget {
+class StudentDashboard extends StatefulWidget {
   final String username;
 
-  DashboardPage({required this.username});
+  StudentDashboard({required this.username});
 
   @override
-  _DashboardPageState createState() => _DashboardPageState();
+  _StudentDashboardState createState() => _StudentDashboardState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _StudentDashboardState extends State<StudentDashboard> {
   String _statusMessage = '';
+  int _timeRemaining = 300; // 5 minutes in seconds
+  Timer? _timer;
+  bool _isAttendanceActive = false;
 
-  void _pressButton() async {
+  @override
+  void initState() {
+    super.initState();
+    _listenForAttendanceTrigger();
+  }
+
+  void _listenForAttendanceTrigger() {
+  Timer.periodic(Duration(seconds: 1), (timer) async {
+    final response = await http.get(Uri.parse('http://172.21.44.180:5000/attendance-status'));
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      setState(() {
+        _isAttendanceActive = data['isActive'];
+        _timeRemaining = data['timeRemaining'];
+
+        // Stop local timer when server marks attendance as inactive
+        if (!_isAttendanceActive && _timer != null) {
+          _timer?.cancel();
+          _timer = null;
+        }
+      });
+    }
+  });
+}
+
+
+  void _startCountdownTimer() {
+    _timeRemaining = 30; // Reset to 5 minutes
+    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+      setState(() {
+        if (_timeRemaining > 0) {
+          _timeRemaining--;
+        } else {
+          _timer?.cancel();
+          _timer = null;
+          _isAttendanceActive = false;
+        }
+      });
+    });
+  }
+
+  
+
+
+
+  void _markAttendance() async {
+  if (_isAttendanceActive) {
     final response = await http.post(
-      Uri.parse('http://172.21.44.180:5000/attendance'), // Replace with your actual backend URL
+      Uri.parse('http://172.21.44.180:5000/attendance'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'student': widget.username}),
     );
@@ -229,7 +308,13 @@ class _DashboardPageState extends State<DashboardPage> {
         _statusMessage = 'Failed to mark attendance. Error: ${response.body}';
       });
     }
+  } else {
+    setState(() {
+      _statusMessage = 'Attendance marking is not active at the moment.';
+    });
   }
+}
+
 
   void _logout() {
     Navigator.pushAndRemoveUntil(
@@ -240,107 +325,190 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   @override
-Widget build(BuildContext context) {
-  return Scaffold(
-    appBar: AppBar(
-      title: Text('Dashboard'),
-    ),
-    body: Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircleAvatar(
-                radius: 30,
-                backgroundColor: Colors.blue,
-                child: Icon(
-                  Icons.person,
-                  size: 40,
-                  color: Colors.white,
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Student Dashboard')),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircleAvatar(
+                  radius: 30,
+                  backgroundColor: Colors.blue,
+                  child: Icon(
+                    Icons.person,
+                    size: 40,
+                    color: Colors.white,
+                  ),
                 ),
-              ),
-              SizedBox(width: 10),
-              Text(
-                'Welcome, ${widget.username}',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          SizedBox(height: 40),
-          _buildDashboardButton(
-            label: 'Attendance Status',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => AttendanceStatusPage()),
-              );
-            },
-          ),
-          _buildDashboardButton(
-            label: 'Profile',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => ProfilePage(username: widget.username)),
-              );
-            },
-          ),
-          _buildDashboardButton(
-            label: 'Give Attendance',
-            onPressed: _pressButton,
-          ),
-          _buildDashboardButton(
-            label: 'Logout',
-            onPressed: _logout,
-          ),
-          if (_statusMessage.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.only(top: 20),
-              child: Text(_statusMessage),
+                SizedBox(width: 10),
+                Text(
+                  'Welcome, ${widget.username}',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                ),
+              ],
             ),
-        ],
+            SizedBox(height: 40),
+            _buildDashboardButton(
+              label: 'Attendance Status',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => AttendanceStatusPage()),
+                );
+              },
+            ),
+            _buildDashboardButton(
+              label: 'Profile',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => ProfilePage(username: widget.username)),
+                );
+              },
+            ),
+            _buildDashboardButton(
+              label: 'Give Attendance',
+              onPressed: _isAttendanceActive ? _markAttendance : null,
+            ),
+            _buildDashboardButton(
+              label: 'Logout',
+              onPressed: _logout,
+            ),
+            if (_statusMessage.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: 20),
+                child: Text(_statusMessage),
+              ),
+            if (_isAttendanceActive)
+              Text('Time Remaining: $_timeRemaining seconds', style: TextStyle(fontSize: 18, color: Colors.red)),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
+
+  Widget _buildDashboardButton({required String label, required VoidCallback? onPressed}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Container(
+        width: 250,
+        height: 60,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(15),
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.5),
+              spreadRadius: 3,
+              blurRadius: 7,
+              offset: Offset(0, 3),
+            ),
+          ],
+        ),
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: onPressed != null ? Colors.blueAccent : Colors.grey,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(15),
+            ),
+            padding: EdgeInsets.symmetric(horizontal: 20),
+          ),
+          onPressed: onPressed,
+          child: Text(
+            label,
+            style: TextStyle(color: Colors.white, fontSize: 18),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 }
 
-Widget _buildDashboardButton({required String label, required VoidCallback onPressed}) {
-  return Padding(
-    padding: const EdgeInsets.symmetric(vertical: 10),
-    child: Container(
-      width: 250,
-      height: 60,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(15),
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.5),
-            spreadRadius: 3,
-            blurRadius: 7,
-            offset: Offset(0, 3),
-          ),
-        ],
-      ),
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.blueAccent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15),
-          ),
-          padding: EdgeInsets.symmetric(horizontal: 20),
+class AdminDashboard extends StatefulWidget {
+  final String username;
+
+  AdminDashboard({required this.username});
+
+  @override
+  _AdminDashboardState createState() => _AdminDashboardState();
+}
+
+class _AdminDashboardState extends State<AdminDashboard> {
+  String _statusMessage = '';
+
+  void _triggerAttendance() async {
+    final response = await http.post(
+      Uri.parse('http://172.21.44.180:5000/trigger-attendance'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'admin': widget.username}),
+    );
+
+    if (response.statusCode == 200) {
+      setState(() {
+        _statusMessage = 'Attendance process started successfully.';
+      });
+    } else {
+      setState(() {
+        _statusMessage = 'Failed to start attendance process. Error: ${response.body}';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Admin Dashboard'),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back),
+          onPressed: () {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (context) => LoginPage()),
+              (Route<dynamic> route) => false,
+            );
+          },
         ),
-        onPressed: onPressed,
-        child: Text(
-          label,
-          style: TextStyle(color: Colors.white, fontSize: 18),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('Welcome, Admin ${widget.username}', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            SizedBox(height: 40),
+            ElevatedButton(
+              onPressed: () {
+                // Navigate to analytics page
+                print('Navigating to analytics...');
+              },
+              child: Text('Analytics'),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _triggerAttendance,
+              child: Text('Trigger Attendance'),
+            ),
+            if (_statusMessage.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: 20),
+                child: Text(_statusMessage),
+              ),
+          ],
         ),
       ),
-    ),
-  );
-}}
+    );
+  }
+}
 
 class AttendanceStatusPage extends StatelessWidget {
   @override
