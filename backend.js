@@ -17,13 +17,30 @@ let isAttendanceActive = false;
 let attendanceTimer = null;
 let timeRemaining = 30; // 30 seconds
 
+// Track IP addresses that have already given attendance
+const ipAttendance = {};
+
 // Endpoint to mark attendance
 app.post('/attendance', (req, res) => {
     const { student } = req.body;
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress; // Get client IP
+
+    if (!clientIp) {
+        return res.status(400).json({ message: 'Unable to track device IP.' });
+    }
+
+    if (ipAttendance[clientIp]) {
+        console.log(`Warning: Proxy attempt detected from IP ${clientIp}`);
+        return res.status(400).json({
+            message: 'Warning: You are attempting to mark attendance for multiple accounts from the same device. This may be considered as proxy attendance and is not allowed.',
+            isProxy: true
+        });
+    }
 
     if (student in students && isAttendanceActive && students[student] === 0) {
         students[student] = 1;
-        console.log(`${student} marked present.`);
+        ipAttendance[clientIp] = student; // Mark this IP as used for attendance
+        console.log(`${student} marked present from IP ${clientIp}.`);
         res.status(200).json({ message: `Thank you ${student}, your attendance has been registered.` });
     } else if (students[student] === 1) {
         res.status(400).json({ message: 'You have already marked your attendance.' });
@@ -41,6 +58,11 @@ app.post('/trigger-attendance', (req, res) => {
     // Reset all students' attendance to 0
     for (let student in students) {
         students[student] = 0;
+    }
+
+    // Reset IP tracking
+    for (let ip in ipAttendance) {
+        delete ipAttendance[ip];
     }
 
     isAttendanceActive = true;
