@@ -1,6 +1,3 @@
-
-
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -38,20 +35,30 @@ class _LoginPageState extends State<LoginPage> {
   UserRole _selectedRole = UserRole.student;
 
   void _login() async {
-    final username = _usernameController.text.toLowerCase();
+    final email = _usernameController.text.toLowerCase();
     final password = _passwordController.text;
 
-    if (password == '1234' && (username == 'john' || username == 'jane' || username == 'alice' || username == 'bob')) {
+    final response = await http.post(
+      Uri.parse('http://172.21.44.180:5000/login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email, 'password': password}),
+   
+    );
+
+    if (response.statusCode == 200) {
+      final userData = jsonDecode(response.body)['userData'];
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (context) => _selectedRole == UserRole.student
-              ? StudentDashboard(username: username)
-              : AdminDashboard(username: username),
+              ? StudentDashboard(userData: userData)
+              : AdminDashboard(username: userData['name']),
         ),
       );
     } else {
       setState(() {
+ print('Sending login request to: http://172.21.44.180:5000/login');
+print('Request body: ${jsonEncode({'email': email, 'password': password})}');
         _errorMessage = 'Invalid login credentials';
       });
     }
@@ -232,9 +239,9 @@ class _LoginPageState extends State<LoginPage> {
 }
 
 class StudentDashboard extends StatefulWidget {
-  final String username;
+  final Map<String, dynamic> userData;
 
-  StudentDashboard({required this.username});
+  StudentDashboard({required this.userData});
 
   @override
   _StudentDashboardState createState() => _StudentDashboardState();
@@ -242,9 +249,8 @@ class StudentDashboard extends StatefulWidget {
 
 class _StudentDashboardState extends State<StudentDashboard> {
   bool _hasMarkedAttendance = false;
-
   String _statusMessage = '';
-  int _timeRemaining = 300; // 5 minutes in seconds
+  int _timeRemaining = 30;
   Timer? _timer;
   bool _isAttendanceActive = false;
 
@@ -254,55 +260,34 @@ class _StudentDashboardState extends State<StudentDashboard> {
     _listenForAttendanceTrigger();
   }
 
- void _listenForAttendanceTrigger() {
-  Timer.periodic(Duration(seconds: 1), (timer) async {
-    final response = await http.get(Uri.parse('http://172.21.44.180:5000/attendance-status'));
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      setState(() {
-        _isAttendanceActive = data['isActive'];
-        _timeRemaining = data['timeRemaining'];
-        if (!_isAttendanceActive) {
-          _hasMarkedAttendance = false; // Reset for next session
-        }
-      });
-    }
-  });
-}
-
-
-
-  void _startCountdownTimer() {
-    _timeRemaining = 30; // Reset to 5 minutes
-    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
-      setState(() {
-        if (_timeRemaining > 0) {
-          _timeRemaining--;
-        } else {
-          _timer?.cancel();
-          _timer = null;
-          _isAttendanceActive = false;
-        }
-      });
+  void _listenForAttendanceTrigger() {
+    Timer.periodic(Duration(seconds: 1), (timer) async {
+      final response = await http.get(Uri.parse('http://172.21.44.180:5000/attendance-status'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          _isAttendanceActive = data['isActive'];
+          _timeRemaining = data['timeRemaining'];
+          if (!_isAttendanceActive) {
+            _hasMarkedAttendance = false;
+          }
+        });
+      }
     });
   }
 
-  
-
-
-
- void _markAttendance() async {
+  void _markAttendance() async {
   if (_isAttendanceActive && !_hasMarkedAttendance) {
     final response = await http.post(
       Uri.parse('http://172.21.44.180:5000/attendance'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'student': widget.username}),
+      body: jsonEncode({'mail_id': widget.userData['mail_id']}),
     );
 
     if (response.statusCode == 200) {
       setState(() {
         _statusMessage = 'Thank you, your attendance has been registered.';
-        _hasMarkedAttendance = true; // Disable further submissions
+        _hasMarkedAttendance = true;
       });
     } else {
       setState(() {
@@ -316,7 +301,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
     });
   }
 }
-
 
   void _logout() {
     Navigator.pushAndRemoveUntil(
@@ -334,44 +318,15 @@ class _StudentDashboardState extends State<StudentDashboard> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircleAvatar(
-                  radius: 30,
-                  backgroundColor: Colors.blue,
-                  child: Icon(
-                    Icons.person,
-                    size: 40,
-                    color: Colors.white,
-                  ),
-                ),
-                SizedBox(width: 10),
-                Text(
-                  'Welcome, ${widget.username}',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                ),
-              ],
+            Text(
+              'Welcome, ${widget.userData['name']}',
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'Roll Number: ${widget.userData['roll_number']}',
+              style: TextStyle(fontSize: 18),
             ),
             SizedBox(height: 40),
-            _buildDashboardButton(
-              label: 'Attendance Status',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => AttendanceStatusPage()),
-                );
-              },
-            ),
-            _buildDashboardButton(
-              label: 'Profile',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => ProfilePage(username: widget.username)),
-                );
-              },
-            ),
             _buildDashboardButton(
               label: 'Give Attendance',
               onPressed: _isAttendanceActive ? _markAttendance : null,
@@ -489,14 +444,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             Text('Welcome, Admin ${widget.username}', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             SizedBox(height: 40),
             ElevatedButton(
-              onPressed: () {
-                // Navigate to analytics page
-                print('Navigating to analytics...');
-              },
-              child: Text('Analytics'),
-            ),
-            SizedBox(height: 20),
-            ElevatedButton(
               onPressed: _triggerAttendance,
               child: Text('Trigger Attendance'),
             ),
@@ -511,6 +458,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 }
+
 
 class AttendanceStatusPage extends StatelessWidget {
   @override
