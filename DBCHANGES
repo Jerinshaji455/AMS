@@ -1,0 +1,10 @@
+ALTER TABLE AMS ADD UNIQUE (mail_id);
+CREATE TABLE IF NOT EXISTS AttendanceHistory (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    date DATE NOT NULL,
+    NAME VARCHAR(255) NOT NULL,
+    mail_id VARCHAR(255) NOT NULL,
+    roll_number VARCHAR(50) NOT NULL,
+    status BOOLEAN NOT NULL,
+    FOREIGN KEY (mail_id) REFERENCES AMS(mail_id)
+);
