@@ -104,7 +104,28 @@ app.post('/attendance', (req, res) => {
         });
     });
 });
-
+app.post('/change-password', (req, res) => {
+    const { userId, currentPassword, newPassword } = req.body;
+  
+    db.query('SELECT * FROM AMS WHERE mail_id = ? AND password = ?', [userId, currentPassword], (err, results) => {
+      if (err) {
+        console.error('Database query failed: ' + err.stack);
+        return res.status(500).json({ message: 'Internal server error' });
+      }
+      if (results.length > 0) {
+        db.query('UPDATE AMS SET password = ? WHERE mail_id = ?', [newPassword, userId], (err, updateResult) => {
+          if (err) {
+            console.error('Database update failed: ' + err.stack);
+            return res.status(500).json({ message: 'Internal server error' });
+          }
+          res.status(200).json({ message: 'Password changed successfully' });
+        });
+      } else {
+        res.status(401).json({ message: 'Current password is incorrect' });
+      }
+    });
+  });
+  
 app.post('/trigger-attendance', (req, res) => {
     if (isAttendanceActive) {
         return res.status(400).json({ message: 'Attendance process is already active.' });
