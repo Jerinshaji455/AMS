@@ -105,22 +105,22 @@ app.post('/attendance', (req, res) => {
     });
 });
 
-app.post('/trigger-attendance',  (req, res) => {
+app.post('/trigger-attendance', (req, res) => {
     if (isAttendanceActive) {
         return res.status(400).json({ message: 'Attendance process is already active.' });
     }
 
-    // Reset has_marked to 0 for all students in AMS table
-    db.query('UPDATE AMS SET has_marked = 0', (err) => {
+    // Clear the AttendanceHistory table
+    db.query('DELETE FROM AttendanceHistory', (err) => {
         if (err) {
-            console.error('Error resetting has_marked in AMS table:', err);
+            console.error('Error clearing AttendanceHistory table:', err);
             return res.status(500).json({ message: 'Internal server error' });
         }
         
-        // Clear only the AttendanceHistory table
-        db.query('DELETE FROM AttendanceHistory', (err) => {
+        // Reset has_marked to 0 for all students in AMS table
+        db.query('UPDATE AMS SET has_marked = 0', (err) => {
             if (err) {
-                console.error('Error clearing AttendanceHistory table:', err);
+                console.error('Error resetting has_marked in AMS table:', err);
                 return res.status(500).json({ message: 'Internal server error' });
             }
             
@@ -182,9 +182,13 @@ app.post('/edit-attendance', (req, res) => {
     });
   });
   
-app.get('/attendance-status', (req, res) => {
-    res.status(200).json({ isActive: isAttendanceActive, timeRemaining });
+  app.get('/attendance-status', (req, res) => {
+    res.status(200).json({ 
+        isActive: isAttendanceActive, 
+        timeRemaining: isAttendanceActive ? timeRemaining : 0 
+    });
 });
+
 app.post('/send-attendance-email', (req, res) => {
     const { adminUsername } = req.body;
 
@@ -248,8 +252,13 @@ app.post('/send-attendance-email', (req, res) => {
 app.get('/attendance-csv', (req, res) => {
     db.query('SELECT NAME, roll_number, status FROM AttendanceHistory', (err, results) => {
         if (err) {
-            console.error('Database query failed: ' + err.stack);
+            console.error('Database query failed:', err.stack);
             return res.status(500).json({ message: 'Internal server error' });
+        }
+
+        // Handle empty results
+        if (results.length === 0) {
+            return res.status(200).send('Name,Roll Number,Attendance\n'); // Send an empty CSV with headers
         }
 
         let csv = 'Name,Roll Number,Attendance\n';
@@ -262,6 +271,17 @@ app.get('/attendance-csv', (req, res) => {
         res.status(200).send(csv);
     });
 });
+
+app.get('/attendance-availability', (req, res) => {
+    db.query('SELECT COUNT(*) as count FROM AttendanceHistory', (err, results) => {
+        if (err) {
+            console.error('Database query failed:', err.stack);
+            return res.status(500).json({ message: 'Internal server error' });
+        }
+        res.json({ dataAvailable: results[0].count > 0 });
+    });
+});
+
 
 const PORT = 5000;
 app.listen(PORT, '0.0.0.0', () => {
