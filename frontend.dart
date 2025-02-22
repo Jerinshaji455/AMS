@@ -44,34 +44,45 @@ class _LoginPageState extends State<LoginPage> {
   UserRole _selectedRole = UserRole.student;
   bool _isPasswordVisible = false; // Track password visibility
 
-  void _login() async {
-    final email = _usernameController.text.toLowerCase();
-    final password = _passwordController.text;
+ void _login() async {
+  final email = _usernameController.text.toLowerCase();
+  final password = _passwordController.text;
+  final selectedRole = _selectedRole == UserRole.student ? 'S' : 'A';
 
-    final response = await http.post(
-      Uri.parse('http://192.168.31.50:5000/login'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email, 'password': password}),
-    );
+  final response = await http.post(
+    Uri.parse('http://192.168.31.50:5000/login'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'email': email,
+      'password': password,
+      'selectedRole': selectedRole
+    }),
+  );
 
-    if (response.statusCode == 200) {
-      final userData = jsonDecode(response.body)['userData'];
+  if (response.statusCode == 200) {
+    final userData = jsonDecode(response.body)['userData'];
+    if (userData['role'] == selectedRole) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => _selectedRole == UserRole.student
+          builder: (context) => selectedRole == 'S'
               ? StudentDashboard(userData: userData)
-              : AdminDashboard(username: userData['name']),
+              : AdminDashboard(username: userData['name'], userData: userData),
         ),
       );
     } else {
       setState(() {
-        print('Sending login request to: http://192.168.31.50:5000/login');
-        print('Request body: ${jsonEncode({'email': email, 'password': password})}');
-        _errorMessage = 'Invalid login credentials';
+        _errorMessage = 'Access denied. Invalid role selected.';
       });
     }
+  } else {
+    setState(() {
+      _errorMessage = 'Invalid login credentials';
+    });
   }
+}
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -492,8 +503,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
 class AdminDashboard extends StatefulWidget {
   final String username;
+  final Map<String, dynamic> userData;
 
-  AdminDashboard({required this.username});
+  AdminDashboard({required this.username, required this.userData});
 
   @override
   _AdminDashboardState createState() => _AdminDashboardState();
@@ -543,6 +555,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
       });
     }
   }
+  void _editAttendance(String rollNumber, bool newStatus) async {
+  final response = await http.post(
+    Uri.parse('http://192.168.31.50:5000/edit-attendance'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'roll_number': rollNumber,
+      'status': newStatus,
+    }),
+  );
+
+  if (response.statusCode == 200) {
+    setState(() {
+      _statusMessage = 'Attendance updated successfully.';
+      _fetchAttendanceCSV(); // Refresh the attendance data
+    });
+  } else {
+    setState(() {
+      _statusMessage = 'Failed to update attendance.';
+    });
+  }
+}
+
  void _sendAttendanceEmail() async {
   final response = await http.post(
     Uri.parse('http://192.168.31.50:5000/send-attendance-email'),
@@ -569,38 +603,53 @@ class _AdminDashboardState extends State<AdminDashboard> {
         .toList();
   }
 
-  Widget _buildAttendanceTable() {
-    List<List<String>> parsedData = _parseCSV(_csvData);
-    
-    if (parsedData.isEmpty) {
-      return Text('No data available');
-    }
+Widget _buildAttendanceTable() {
+  List<List<String>> parsedData = _parseCSV(_csvData);
+  
+  if (parsedData.isEmpty) {
+    return Text('No data available');
+  }
 
-    // Ensure all rows have the same number of columns
-    int columnCount = parsedData[0].length;
-    parsedData = parsedData.where((row) => row.length == columnCount).toList();
+  // Ensure all rows have the same number of columns
+  int columnCount = parsedData[0].length;
+  parsedData = parsedData.where((row) => row.length == columnCount).toList();
 
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey),
-        borderRadius: BorderRadius.circular(10),
-      ),
+  return Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
       child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SingleChildScrollView(
-          child: DataTable(
-            headingRowColor: MaterialStateProperty.all(Colors.blue[100]),
-            columns: parsedData[0].map((header) => DataColumn(
-              label: Text(header, style: TextStyle(fontWeight: FontWeight.bold)),
-            )).toList(),
-            rows: parsedData.skip(1).map((row) => DataRow(
-              cells: row.map((cell) => DataCell(Text(cell))).toList(),
-            )).toList(),
-          ),
+        child: DataTable(
+          columns: [
+            DataColumn(label: Text('Name')),
+            DataColumn(label: Text('Roll Number')),
+            DataColumn(label: Text('Attendance')),
+            DataColumn(label: Text('Edit')),
+          ],
+          rows: parsedData.skip(1).map((row) => DataRow(
+            cells: [
+              DataCell(Text(row[0])),
+              DataCell(Text(row[1])),
+              DataCell(Text(row[2])),
+              DataCell(
+                Switch(
+                  value: row[2] == 'Present',
+                  onChanged: (bool value) {
+                    _editAttendance(row[1], value);
+                  },
+                ),
+              ),
+            ],
+          )).toList(),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 
   @override
   Widget build(BuildContext context) {
