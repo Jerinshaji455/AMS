@@ -1,12 +1,10 @@
 const express = require('express');
 const cors = require('cors');
-const mysql = require('mysql2'); // Require mysql
+const mysql = require('mysql2');
 const app = express();
-
+const nodemailer = require('nodemailer');
 app.use(cors());
 app.use(express.json());
-
-// Database Configuration
 
 const db = mysql.createConnection({
     host: 'localhost',
@@ -14,7 +12,6 @@ const db = mysql.createConnection({
     password: 'jerinshaji455',
     database: 'AMS'
 });
-
 
 db.connect((err) => {
     if (err) {
@@ -26,9 +23,10 @@ db.connect((err) => {
 
 let isAttendanceActive = false;
 let attendanceTimer = null;
-let timeRemaining = 30;
+let timeRemaining = 70;
 
 const ipAttendance = {};
+
 app.post('/login', (req, res) => {
     const { email, password } = req.body;
     db.query('SELECT * FROM AMS WHERE mail_id = ? AND password = ?', [email, password], (err, results) => {
@@ -51,13 +49,11 @@ app.post('/login', (req, res) => {
     });
 });
 
-
-// Endpoint to mark attendance
 app.post('/attendance', (req, res) => {
-    const { mail_id } = req.body; // Use mail_id for identification
+    const { mail_id } = req.body;
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-    console.log(`Received mail_id: ${mail_id}`); // Log received mail_id
+    console.log(`Received mail_id: ${mail_id}`);
 
     if (!clientIp) {
         return res.status(400).json({ message: 'Unable to track device IP.' });
@@ -75,14 +71,13 @@ app.post('/attendance', (req, res) => {
         return res.status(400).json({ message: 'Attendance not active.' });
     }
 
-    // Use mail_id for checking student existence
     db.query('SELECT * FROM AMS WHERE mail_id = ?', [mail_id], (err, results) => {
         if (err) {
             console.error('Database query failed: ' + err.stack);
             return res.status(500).json({ message: 'Internal server error' });
         }
 
-        console.log(results); // Log query results
+        console.log(results);
 
         if (results.length === 0) {
             return res.status(404).json({ message: 'Student not found or attendance not active.' });
@@ -92,78 +87,150 @@ app.post('/attendance', (req, res) => {
             return res.status(400).json({ message: 'You have already marked your attendance.' });
         }
 
-        // Update attendance count. Set to zero after process ends
         db.query('UPDATE AMS SET has_marked = 1 WHERE mail_id = ?', [mail_id], (err, updateResults) => {
             if (err) {
                 console.error('Database update failed: ' + err.stack);
                 return res.status(500).json({ message: 'Internal server error' });
             }
-            ipAttendance[clientIp] = mail_id; // Mark this IP as used for attendance
+            ipAttendance[clientIp] = mail_id;
             console.log(`${results[0].NAME} (ID: ${results[0].roll_number}) marked present from IP ${clientIp}.`);
             res.status(200).json({ message: `Thank you ${results[0].NAME}, your attendance has been registered.` });
         });
     });
 });
 
-// Endpoint to trigger attendance
 app.post('/trigger-attendance', (req, res) => {
     if (isAttendanceActive) {
         return res.status(400).json({ message: 'Attendance process is already active.' });
     }
 
-    // Reset all students' has_marked to 0 in the database
-    db.query('UPDATE AMS SET has_marked = 0', (err, results) => {
+    // Reset has_marked to 0 for all students in AMS table
+    db.query('UPDATE AMS SET has_marked = 0', (err) => {
         if (err) {
-            console.error('Database update failed: ' + err.stack);
+            console.error('Error resetting has_marked in AMS table:', err);
             return res.status(500).json({ message: 'Internal server error' });
         }
+        
+        // Clear only the AttendanceHistory table
+        db.query('DELETE FROM AttendanceHistory', (err) => {
+            if (err) {
+                console.error('Error clearing AttendanceHistory table:', err);
+                return res.status(500).json({ message: 'Internal server error' });
+            }
+            
+            // Reset IP tracking
+            for (let ip in ipAttendance) {
+                delete ipAttendance[ip];
+            }
 
-        // Reset IP tracking
-        for (let ip in ipAttendance) {
-            delete ipAttendance[ip];
-        }
+            isAttendanceActive = true;
+            timeRemaining = 70;
+            console.log("Starting attendance process...");
 
-        isAttendanceActive = true;
-        timeRemaining = 30;
-        console.log("Starting attendance process...");
-
-        // Start countdown timer
-        attendanceTimer = setInterval(() => {
-            if (timeRemaining > 0) {
-                timeRemaining--;
-            } else {
-                clearInterval(attendanceTimer);
-                isAttendanceActive = false;
-                console.log("Attendance process ended.");
-                // Get attendance counts
-                db.query('SELECT NAME, has_marked FROM AMS', (err, results) => {
-                    if (err) {
-                        console.error('Database query failed: ' + err.stack);
-                        return;
-                    }
-
-                    console.log("Final attendance summary:");
-                    for (const row of results) {
-                        console.log(`${row.NAME}: ${row.has_marked}`);
-                    }
-
-                    // Reset has_marked status for next attendance
-                    db.query('UPDATE AMS SET has_marked = 0', (err, resetResults) => {
+            attendanceTimer = setInterval(() => {
+                if (timeRemaining > 0) {
+                    timeRemaining--;
+                } else {
+                    clearInterval(attendanceTimer);
+                    isAttendanceActive = false;
+                    console.log("Attendance process ended.");
+                    
+                    // Move data from AMS to AttendanceHistory
+                    db.query('INSERT INTO AttendanceHistory (date, NAME, mail_id, roll_number, status) SELECT CURDATE(), NAME, mail_id, roll_number, has_marked FROM AMS', (err, results) => {
                         if (err) {
-                            console.error('Database update failed: ' + err.stack);
+                            console.error('Error saving attendance history:', err);
+                        } else {
+                            console.log('Attendance history saved successfully');
                         }
                     });
-                });
-            }
-        }, 1000);
+                }
+            }, 1000);
 
-        res.status(200).json({ message: 'Attendance process started.' });
+            res.status(200).json({ message: 'Attendance process started.' });
+        });
     });
 });
 
-// Endpoint to check if attendance is active and get remaining time
+
 app.get('/attendance-status', (req, res) => {
     res.status(200).json({ isActive: isAttendanceActive, timeRemaining });
+});
+app.post('/send-attendance-email', (req, res) => {
+    const { adminUsername } = req.body;
+
+    // First, retrieve the admin's email from the database
+    db.query('SELECT mail_id FROM AMS WHERE NAME = ?', [adminUsername], (err, results) => {
+        if (err || results.length === 0) {
+            console.error('Error retrieving admin email:', err);
+            return res.status(500).json({ message: 'Failed to retrieve admin email' });
+        }
+
+        const adminEmail = results[0].mail_id;
+
+        // Now proceed with sending the email
+        db.query('SELECT NAME, roll_number, status FROM AttendanceHistory', (err, results) => {
+            if (err) {
+                console.error('Database query failed: ' + err.stack);
+                return res.status(500).json({ message: 'Internal server error' });
+            }
+
+            let csv = 'Name,Roll Number,Attendance\n';
+            results.forEach(row => {
+                csv += `${row.NAME},${row.roll_number},${row.status ? 'Present' : 'Absent'}\n`;
+            });
+
+            // Configure email transporter (replace with your SMTP settings)
+            let transporter = nodemailer.createTransport({
+                host: "smtp.gmail.com",
+                port: 587,
+                secure: false,
+                auth: {
+                    user: "nitcrig@gmail.com",
+                    pass: "wimu gjsm glan uiij"
+                }
+            });
+
+            // Send email
+            transporter.sendMail({
+                from: '"Attendance System" <jerin_b220336ec@nitc.ac.in>',
+                to: adminEmail,
+                subject: "Attendance Report",
+                text: "Please find the attendance report attached.",
+                attachments: [
+                    {
+                        filename: 'attendance.csv',
+                        content: csv
+                    }
+                ]
+            }, (error, info) => {
+                if (error) {
+                    console.error('Error sending email:', error);
+                    res.status(500).json({ message: 'Failed to send email' });
+                } else {
+                    console.log('Email sent:', info.response);
+                    res.status(200).json({ message: 'Attendance report sent successfully' });
+                }
+            });
+        });
+    });
+});
+
+app.get('/attendance-csv', (req, res) => {
+    db.query('SELECT NAME, roll_number, status FROM AttendanceHistory', (err, results) => {
+        if (err) {
+            console.error('Database query failed: ' + err.stack);
+            return res.status(500).json({ message: 'Internal server error' });
+        }
+
+        let csv = 'Name,Roll Number,Attendance\n';
+        results.forEach(row => {
+            csv += `${row.NAME},${row.roll_number},${row.status ? 'Present' : 'Absent'}\n`;
+        });
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=attendance.csv');
+        res.status(200).send(csv);
+    });
 });
 
 const PORT = 5000;
