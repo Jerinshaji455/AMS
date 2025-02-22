@@ -7,6 +7,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import 'package:file_saver/file_saver.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
+import './store_ip.dart';
 import 'dart:typed_data';
 void main() {
   runApp(MyApp());
@@ -30,7 +32,7 @@ class MyApp extends StatelessWidget {
   
 }
 
-enum UserRole { student, admin }
+enum UserRole { student, admin, operator }
 
 class LoginPage extends StatefulWidget {
   @override
@@ -42,47 +44,90 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   String _errorMessage = '';
   UserRole _selectedRole = UserRole.student;
-  bool _isPasswordVisible = false; // Track password visibility
+  bool _isPasswordVisible = false;
+  String? _serverIPAddress;
 
- void _login() async {
-  final email = _usernameController.text.toLowerCase();
-  final password = _passwordController.text;
-  final selectedRole = _selectedRole == UserRole.student ? 'S' : 'A';
+  @override
+  void initState() {
+    super.initState();
+    _loadIPAddress();
+  }
 
-  final response = await http.post(
-    Uri.parse('http://192.168.31.50:5000/login'),
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode({
-      'email': email,
-      'password': password,
-      'selectedRole': selectedRole
-    }),
-  );
+  Future<void> _loadIPAddress() async {
+    _serverIPAddress = await IPAddressManager.getIPAddress();
+    setState(() {});
+  }
 
-  if (response.statusCode == 200) {
-    final userData = jsonDecode(response.body)['userData'];
-    if (userData['role'] == selectedRole) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => selectedRole == 'S'
-              ? StudentDashboard(userData: userData)
-              : AdminDashboard(username: userData['name'], userData: userData),
-        ),
-      );
+  void _login() async {
+    final email = _usernameController.text.toLowerCase();
+    final password = _passwordController.text;
+    final selectedRole = _selectedRole == UserRole.student ? 'S' : 'A';
+
+    if (_serverIPAddress == null || _serverIPAddress!.isEmpty) {
+      setState(() {
+        _errorMessage = 'Server IP address is not set. Please contact operator.';
+      });
+      return;
+    }
+
+    final response = await http.post(
+      Uri.parse('http://$_serverIPAddress:5000/login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'email': email,
+        'password': password,
+        'selectedRole': selectedRole
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final userData = jsonDecode(response.body)['userData'];
+      if (userData['role'] == selectedRole) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => selectedRole == 'S'
+                ? StudentDashboard(userData: userData, serverIPAddress: _serverIPAddress!)
+                : AdminDashboard(username: userData['name'], userData: userData, serverIPAddress: _serverIPAddress!),
+          ),
+        );
+      }
+      
+  if (_selectedRole == UserRole.operator) {
+    if (email == "subin" && password == "1234") {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => OperatorPage()),
+      ).then((_) => _loadIPAddress());
+   
+    return;
+  }}
+    
+      
+      
+       else {
+        setState(() {
+          _errorMessage = 'Access denied. Invalid role selected.';
+        });
+      }
     } else {
       setState(() {
-        _errorMessage = 'Access denied. Invalid role selected.';
+        _errorMessage = 'Invalid login credentials';
       });
     }
-  } else {
-    setState(() {
-      _errorMessage = 'Invalid login credentials';
-    });
   }
-}
 
-
+Widget _buildSetIPButton() {
+    return ElevatedButton(
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => OperatorPage()),
+        ).then((value) => _loadIPAddress()); // Reload IP after returning
+      },
+      child: Text('Set Server IP'),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -156,6 +201,8 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 SizedBox(height: 16),
                 _buildRoleSelector(),
+                 SizedBox(height: 16),
+                _buildSetIPButton(),
                 SizedBox(height: 32),
                 ElevatedButton(
                   onPressed: _login,
@@ -180,6 +227,45 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+
+   Widget _buildRoleSelector() {
+  return Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Radio(
+        value: UserRole.student,
+        groupValue: _selectedRole,
+        onChanged: (UserRole? value) {
+          setState(() {
+            _selectedRole = value!;
+          });
+        },
+      ),
+      Text('Student'),
+      Radio(
+        value: UserRole.admin,
+        groupValue: _selectedRole,
+        onChanged: (UserRole? value) {
+          setState(() {
+            _selectedRole = value!;
+          });
+        },
+      ),
+      Text('Admin'),
+      Radio(
+        value: UserRole.operator,
+        groupValue: _selectedRole,
+        onChanged: (UserRole? value) {
+          setState(() {
+            _selectedRole = value!;
+          });
+        },
+      ),
+      Text('Operator'),
+    ],
+  );
+}
+
 
  Widget _buildPasswordField({
     required String label,
@@ -237,8 +323,7 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-
-  Widget _buildInputField({
+ Widget _buildInputField({
     required String label,
     required IconData icon,
     required String hintText,
@@ -275,47 +360,182 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
               ),
-              
             ],
           ),
         ],
       ),
     );
   }
+}
+class ChangePasswordPage extends StatefulWidget {
+  final String userId;
+  final String serverIPAddress;
 
-  Widget _buildRoleSelector() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-       children: [
-        Radio(
-          value: UserRole.student,
-          groupValue: _selectedRole,
-          onChanged: (UserRole? value) {
-            setState(() {
-              _selectedRole = value!; 
-            });
-          },
+  ChangePasswordPage({required this.userId, required this.serverIPAddress});
+
+  @override
+  _ChangePasswordPageState createState() => _ChangePasswordPageState();
+}
+
+class _ChangePasswordPageState extends State<ChangePasswordPage> {
+  final _currentPasswordController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  String _errorMessage = '';
+
+  Future<void> _changePassword() async {
+    if (_newPasswordController.text != _confirmPasswordController.text) {
+      setState(() {
+        _errorMessage = 'New passwords do not match';
+      });
+      return;
+    }
+
+    final response = await http.post(
+      Uri.parse('http://${widget.serverIPAddress}:5000/change-password'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': widget.userId,
+        'currentPassword': _currentPasswordController.text,
+        'newPassword': _newPasswordController.text,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Password changed successfully')),
+      );
+    } else {
+      setState(() {
+        _errorMessage = 'Failed to change password. Please try again.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Change Password')),
+      body: Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            TextField(
+              controller: _currentPasswordController,
+              obscureText: true,
+              decoration: InputDecoration(labelText: 'Current Password'),
+            ),
+            TextField(
+              controller: _newPasswordController,
+              obscureText: true,
+              decoration: InputDecoration(labelText: 'New Password'),
+            ),
+            TextField(
+              controller: _confirmPasswordController,
+              obscureText: true,
+              decoration: InputDecoration(labelText: 'Confirm New Password'),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _changePassword,
+              child: Text('Change Password'),
+            ),
+            if (_errorMessage.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: 20),
+                child: Text(_errorMessage, style: TextStyle(color: Colors.red)),
+              ),
+          ],
         ),
-        Text('Student'),
-        Radio(
-          value: UserRole.admin,
-          groupValue: _selectedRole,
-          onChanged: (UserRole? value) {
-            setState(() {
-              _selectedRole = value!;
-            });
-          },
-        ),
-        Text('Admin'),
-      ],
+      ),
     );
   }
 }
 
+
+class OperatorPage extends StatefulWidget {
+  @override
+  _OperatorPageState createState() => _OperatorPageState();
+}
+
+class _OperatorPageState extends State<OperatorPage> {
+  final _codeController = TextEditingController();
+  final _ipAddressController = TextEditingController();
+  String _errorMessage = '';
+  String? _currentIP;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentIP();
+  }
+
+  Future<void> _loadCurrentIP() async {
+    _currentIP = await IPAddressManager.getIPAddress();
+    setState(() {});
+  }
+
+  Future<void> _setIPAddress() async {
+    if (_codeController.text == "NITC") {
+      final ipAddress = _ipAddressController.text;
+      await IPAddressManager.setIPAddress(ipAddress);
+      _loadCurrentIP();
+      setState(() {
+        _errorMessage = 'IP Address updated successfully';
+        _codeController.clear();
+        _ipAddressController.clear();
+      });
+    } else {
+      setState(() {
+        _errorMessage = 'Invalid Code';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Operator Settings')),
+      body: Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Current IP: ${_currentIP ?? "Not set"}', style: TextStyle(fontSize: 18)),
+            SizedBox(height: 20),
+            TextField(
+              controller: _codeController,
+              decoration: InputDecoration(labelText: 'Enter Code'),
+              obscureText: true,
+            ),
+            TextField(
+              controller: _ipAddressController,
+              decoration: InputDecoration(labelText: 'Enter New Server IP Address'),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _setIPAddress,
+              child: Text('Update IP Address'),
+            ),
+            if (_errorMessage.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: 20),
+                child: Text(_errorMessage, style: TextStyle(color: Colors.red)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
 class StudentDashboard extends StatefulWidget {
   final Map<String, dynamic> userData;
+  final String serverIPAddress; // Added
 
-  StudentDashboard({required this.userData});
+  StudentDashboard({Key? key, required this.userData, required this.serverIPAddress}) : super(key: key);
 
   @override
   _StudentDashboardState createState() => _StudentDashboardState();
@@ -336,7 +556,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
   void _listenForAttendanceTrigger() {
     Timer.periodic(Duration(seconds: 1), (timer) async {
-      final response = await http.get(Uri.parse('http://192.168.31.50:5000/attendance-status'));
+      final response = await http.get(Uri.parse('http://${widget.serverIPAddress}:5000/attendance-status'));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() {
@@ -353,7 +573,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
   void _markAttendance() async {
   if (_isAttendanceActive && !_hasMarkedAttendance) {
     final response = await http.post(
-      Uri.parse('http://192.168.31.50:5000/attendance'),
+      Uri.parse('http://${widget.serverIPAddress}:5000/attendance'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'mail_id': widget.userData['mail_id']}),
     );
@@ -439,6 +659,20 @@ class _StudentDashboardState extends State<StudentDashboard> {
                _isAttendanceActive ? _markAttendance : null,
             ),
             _buildDashboardButton(
+              label:'Change Password',
+  onPressed: () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => ChangePasswordPage(
+        userId: widget.userData['mail_id'],
+        serverIPAddress: widget.serverIPAddress,
+      )),
+    );
+  },
+  
+),
+
+            _buildDashboardButton(
               label: 'Logout',
               onPressed: _logout,
             ),
@@ -504,8 +738,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
 class AdminDashboard extends StatefulWidget {
   final String username;
   final Map<String, dynamic> userData;
+  final String serverIPAddress;   // Added
 
-  AdminDashboard({required this.username, required this.userData});
+
+  AdminDashboard({required this.username,required this.userData, required this.serverIPAddress});
 
   @override
   _AdminDashboardState createState() => _AdminDashboardState();
@@ -531,7 +767,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   void _checkAttendanceStatus() async {
-    final response = await http.get(Uri.parse('http://192.168.31.50:5000/attendance-status'));
+    final response = await http.get(Uri.parse('http://${widget.serverIPAddress}:5000/attendance-status'));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       setState(() {
@@ -554,7 +790,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
 
     final response = await http.post(
-      Uri.parse('http://192.168.31.50:5000/trigger-attendance'),
+      Uri.parse('http://${widget.serverIPAddress}:5000/trigger-attendance'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'admin': widget.username}),
     );
@@ -577,7 +813,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   });
 
   // Check if attendance data is available
-  final availabilityResponse = await http.get(Uri.parse('http://192.168.31.50:5000/attendance-availability'));
+  final availabilityResponse = await http.get(Uri.parse('http://${widget.serverIPAddress}:5000/attendance-availability'));
   if (availabilityResponse.statusCode == 200) {
     final availabilityData = jsonDecode(availabilityResponse.body);
     if (!availabilityData['dataAvailable']) {
@@ -594,7 +830,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   // Fetch attendance data
-  final response = await http.get(Uri.parse('http://192.168.31.50:5000/attendance-csv'));
+  final response = await http.get(Uri.parse('http://${widget.serverIPAddress}:5000/attendance-csv'));
   if (response.statusCode == 200) {
     setState(() {
       _csvData = response.body;
@@ -608,7 +844,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   void _editAttendance(String rollNumber, bool newStatus) async {
   final response = await http.post(
-    Uri.parse('http://192.168.31.50:5000/edit-attendance'),
+    Uri.parse('http://${widget.serverIPAddress}:5000/edit-attendance'),
     headers: {'Content-Type': 'application/json'},
     body: jsonEncode({
       'roll_number': rollNumber,
@@ -630,7 +866,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
  void _sendAttendanceEmail() async {
   final response = await http.post(
-    Uri.parse('http://192.168.31.50:5000/send-attendance-email'),
+    Uri.parse('http://${widget.serverIPAddress}:5000/send-attendance-email'),
     headers: {'Content-Type': 'application/json'},
     body: jsonEncode({'adminUsername': widget.username}),
   );
@@ -712,6 +948,41 @@ Widget _buildAttendanceTable() {
   );
 }
 
+Widget _buildDashboardButton({required String label, required VoidCallback? onPressed}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 10),
+    child: Container(
+      width: 250,
+      height: 60,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blue.withOpacity(0.3),
+            spreadRadius: 2,
+            blurRadius: 5,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.blue[600],
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+          padding: EdgeInsets.symmetric(horizontal: 20),
+        ),
+        onPressed: onPressed,
+        child: Text(
+          label,
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+      ),
+    ),
+  );
+}
 
 
   @override
@@ -752,19 +1023,37 @@ Widget _buildAttendanceTable() {
                 'Time Remaining: $_timeRemaining seconds',
                 style: TextStyle(fontSize: 18, color: Colors.red),
               ),
-              ElevatedButton(
+              _buildDashboardButton(
+                label:'Trigger Attendance',
                 onPressed: _triggerAttendance,
-                child: Text('Trigger Attendance'),
+                
               ),
               SizedBox(height: 20),
-              ElevatedButton(
+              _buildDashboardButton(
+                label:'Fetch Attendance Data',
                 onPressed: _fetchAttendanceCSV,
-                child: Text('Fetch Attendance Data'),
+                
               ),
+               _buildDashboardButton(
+                label:'Change Password',
+  onPressed: () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => ChangePasswordPage(
+        userId: widget.userData['mail_id'],
+        serverIPAddress: widget.serverIPAddress,
+      )),
+    );
+  },
+ 
+),
+
              SizedBox(height: 20),
-              ElevatedButton(
+              _buildDashboardButton(
+                label:'Send Attendance Report',
+
                 onPressed: _sendAttendanceEmail,
-                child: Text('Send Attendance Report'),
+               
               ),
               if (_statusMessage.isNotEmpty)
                 Padding(
