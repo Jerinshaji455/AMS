@@ -514,6 +514,38 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard> {
   String _statusMessage = '';
   String _csvData = '';
+  bool _isAttendanceActive = false;
+  int _timeRemaining = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startPollingAttendanceStatus();
+  }
+
+  void _startPollingAttendanceStatus() {
+    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+      _checkAttendanceStatus();
+    });
+  }
+
+  void _checkAttendanceStatus() async {
+    final response = await http.get(Uri.parse('http://192.168.31.50:5000/attendance-status'));
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      setState(() {
+        _isAttendanceActive = data['isActive'];
+        _timeRemaining = data['timeRemaining'];
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   void _triggerAttendance() async {
     setState(() {
@@ -538,23 +570,42 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  void _fetchAttendanceCSV() async {
-    setState(() {
-      _statusMessage = '';
-      _csvData = '';
-    });
+ void _fetchAttendanceCSV() async {
+  setState(() {
+    _statusMessage = '';
+    _csvData = '';
+  });
 
-    final response = await http.get(Uri.parse('http://192.168.31.50:5000/attendance-csv'));
-    if (response.statusCode == 200) {
+  // Check if attendance data is available
+  final availabilityResponse = await http.get(Uri.parse('http://192.168.31.50:5000/attendance-availability'));
+  if (availabilityResponse.statusCode == 200) {
+    final availabilityData = jsonDecode(availabilityResponse.body);
+    if (!availabilityData['dataAvailable']) {
       setState(() {
-        _csvData = response.body;
+        _statusMessage = 'No attendance data available yet.';
       });
-    } else {
-      setState(() {
-        _statusMessage = 'Failed to fetch attendance data.';
-      });
+      return;
     }
+  } else {
+    setState(() {
+      _statusMessage = 'Failed to check attendance data availability.';
+    });
+    return;
   }
+
+  // Fetch attendance data
+  final response = await http.get(Uri.parse('http://192.168.31.50:5000/attendance-csv'));
+  if (response.statusCode == 200) {
+    setState(() {
+      _csvData = response.body;
+    });
+  } else {
+    setState(() {
+      _statusMessage = 'Failed to fetch attendance data.';
+    });
+  }
+}
+
   void _editAttendance(String rollNumber, bool newStatus) async {
   final response = await http.post(
     Uri.parse('http://192.168.31.50:5000/edit-attendance'),
@@ -605,12 +656,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
 Widget _buildAttendanceTable() {
   List<List<String>> parsedData = _parseCSV(_csvData);
-  
-  if (parsedData.isEmpty) {
-    return Text('No data available');
+
+  // Check if data is empty
+  if (parsedData.isEmpty || parsedData.length < 2) {
+    return Text('No attendance data available.');
   }
 
-  // Ensure all rows have the same number of columns
+  // Ensure all rows have the same number of columns as the header
   int columnCount = parsedData[0].length;
   parsedData = parsedData.where((row) => row.length == columnCount).toList();
 
@@ -623,32 +675,43 @@ Widget _buildAttendanceTable() {
       scrollDirection: Axis.horizontal,
       child: SingleChildScrollView(
         child: DataTable(
+          headingRowColor: MaterialStateProperty.all(Colors.blue[100]),
           columns: [
             DataColumn(label: Text('Name')),
             DataColumn(label: Text('Roll Number')),
             DataColumn(label: Text('Attendance')),
             DataColumn(label: Text('Edit')),
           ],
-          rows: parsedData.skip(1).map((row) => DataRow(
-            cells: [
-              DataCell(Text(row[0])),
-              DataCell(Text(row[1])),
-              DataCell(Text(row[2])),
-              DataCell(
-                Switch(
-                  value: row[2] == 'Present',
-                  onChanged: (bool value) {
-                    _editAttendance(row[1], value);
-                  },
+          rows: parsedData.skip(1).map((row) {
+            // Handle missing or invalid data gracefully
+            String name = row.length > 0 ? row[0] : 'N/A';
+            String rollNumber = row.length > 1 ? row[1] : 'N/A';
+            String attendanceStatus = row.length > 2 ? row[2] : 'Absent';
+
+            return DataRow(
+              cells: [
+                DataCell(Text(name)),
+                DataCell(Text(rollNumber)),
+                DataCell(Text(attendanceStatus)),
+                DataCell(
+                  Switch(
+                    value: attendanceStatus == 'Present',
+                    onChanged: (bool value) {
+                      if (rollNumber != 'N/A') {
+                        _editAttendance(rollNumber, value);
+                      }
+                    },
+                  ),
                 ),
-              ),
-            ],
-          )).toList(),
+              ],
+            );
+          }).toList(),
         ),
       ),
     ),
   );
 }
+
 
 
   @override
@@ -684,6 +747,11 @@ Widget _buildAttendanceTable() {
               SizedBox(height: 20),
               Text('Welcome, Admin ${widget.username}', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
               SizedBox(height: 40),
+               if (_isAttendanceActive)
+              Text(
+                'Time Remaining: $_timeRemaining seconds',
+                style: TextStyle(fontSize: 18, color: Colors.red),
+              ),
               ElevatedButton(
                 onPressed: _triggerAttendance,
                 child: Text('Trigger Attendance'),
