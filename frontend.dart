@@ -2,10 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'dart:io';
+import 'package:file_saver/file_saver.dart';
 
+import 'dart:typed_data';
 void main() {
   runApp(MyApp());
 }
+ 
 
 class MyApp extends StatelessWidget {
   @override
@@ -17,8 +23,11 @@ class MyApp extends StatelessWidget {
       ),
       home: LoginPage(),
       debugShowCheckedModeBanner: false,
+
     );
+    
   }
+  
 }
 
 enum UserRole { student, admin }
@@ -33,16 +42,16 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   String _errorMessage = '';
   UserRole _selectedRole = UserRole.student;
+  bool _isPasswordVisible = false; // Track password visibility
 
   void _login() async {
     final email = _usernameController.text.toLowerCase();
     final password = _passwordController.text;
 
     final response = await http.post(
-      Uri.parse('http://172.21.44.180:5000/login'),
+      Uri.parse('http://192.168.31.50:5000/login'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'password': password}),
-   
     );
 
     if (response.statusCode == 200) {
@@ -57,8 +66,8 @@ class _LoginPageState extends State<LoginPage> {
       );
     } else {
       setState(() {
- print('Sending login request to: http://172.21.44.180:5000/login');
-print('Request body: ${jsonEncode({'email': email, 'password': password})}');
+        print('Sending login request to: http://192.168.31.50:5000/login');
+        print('Request body: ${jsonEncode({'email': email, 'password': password})}');
         _errorMessage = 'Invalid login credentials';
       });
     }
@@ -128,11 +137,10 @@ print('Request body: ${jsonEncode({'email': email, 'password': password})}');
                   controller: _usernameController,
                 ),
                 SizedBox(height: 16),
-                _buildInputField(
+                _buildPasswordField(
                   label: 'Password',
                   icon: Icons.lock_outline,
                   hintText: '············',
-                  isPassword: true,
                   controller: _passwordController,
                 ),
                 SizedBox(height: 16),
@@ -162,11 +170,10 @@ print('Request body: ${jsonEncode({'email': email, 'password': password})}');
     );
   }
 
-  Widget _buildInputField({
+ Widget _buildPasswordField({
     required String label,
     required IconData icon,
     required String hintText,
-    bool isPassword = false,
     required TextEditingController controller,
   }) {
     return Container(
@@ -193,7 +200,7 @@ print('Request body: ${jsonEncode({'email': email, 'password': password})}');
               Expanded(
                 child: TextField(
                   controller: controller,
-                  obscureText: isPassword,
+                  obscureText: !_isPasswordVisible, // Use _isPasswordVisible
                   decoration: InputDecoration(
                     hintText: hintText,
                     border: InputBorder.none,
@@ -201,7 +208,63 @@ print('Request body: ${jsonEncode({'email': email, 'password': password})}');
                   ),
                 ),
               ),
-              if (isPassword) Icon(Icons.visibility_outlined, color: Color(0xFF4D4D4D)),
+               GestureDetector( // Use GestureDetector
+                  onTap: () {
+                    setState(() {
+                      _isPasswordVisible = !_isPasswordVisible; // Toggle visibility
+                    });
+                  },
+                  child: Icon(
+                    _isPasswordVisible ? Icons.visibility : Icons.visibility_off, // Change icon
+                    color: Color(0xFF4D4D4D),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+
+  Widget _buildInputField({
+    required String label,
+    required IconData icon,
+    required String hintText,
+    required TextEditingController controller,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0xFFE6EEF8),
+            blurRadius: 20,
+          ),
+        ],
+      ),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(color: Color(0xFF4D4D4D))),
+          SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(icon, color: Color(0xFF4D4D4D)),
+              SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                   decoration: InputDecoration(
+                    hintText: hintText,
+                    border: InputBorder.none,
+                    hintStyle: TextStyle(color: Colors.black),
+                  ),
+                ),
+              ),
+              
             ],
           ),
         ],
@@ -212,13 +275,13 @@ print('Request body: ${jsonEncode({'email': email, 'password': password})}');
   Widget _buildRoleSelector() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: [
+       children: [
         Radio(
           value: UserRole.student,
           groupValue: _selectedRole,
           onChanged: (UserRole? value) {
             setState(() {
-              _selectedRole = value!;
+              _selectedRole = value!; 
             });
           },
         ),
@@ -250,7 +313,7 @@ class StudentDashboard extends StatefulWidget {
 class _StudentDashboardState extends State<StudentDashboard> {
   bool _hasMarkedAttendance = false;
   String _statusMessage = '';
-  int _timeRemaining = 30;
+  int _timeRemaining = 70;
   Timer? _timer;
   bool _isAttendanceActive = false;
 
@@ -262,7 +325,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
   void _listenForAttendanceTrigger() {
     Timer.periodic(Duration(seconds: 1), (timer) async {
-      final response = await http.get(Uri.parse('http://172.21.44.180:5000/attendance-status'));
+      final response = await http.get(Uri.parse('http://192.168.31.50:5000/attendance-status'));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() {
@@ -279,7 +342,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
   void _markAttendance() async {
   if (_isAttendanceActive && !_hasMarkedAttendance) {
     final response = await http.post(
-      Uri.parse('http://172.21.44.180:5000/attendance'),
+      Uri.parse('http://192.168.31.50:5000/attendance'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'mail_id': widget.userData['mail_id']}),
     );
@@ -302,6 +365,13 @@ class _StudentDashboardState extends State<StudentDashboard> {
   }
 }
 
+  void clearText() {
+  setState(() {
+    _statusMessage = '';
+  });
+}
+
+
   void _logout() {
     Navigator.pushAndRemoveUntil(
       context,
@@ -313,11 +383,35 @@ class _StudentDashboardState extends State<StudentDashboard> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Student Dashboard')),
+      appBar: AppBar(
+        title: Text('Student Dashboard'),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back),
+          onPressed: () {
+             clearText();
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => LoginPage()),
+            );
+          },
+        ),
+      ),
+      
       body: Center(
+        
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+ CircleAvatar( 
+              radius: 50,
+              backgroundColor: Colors.blue,
+              child: Icon(
+                Icons.person,
+                size: 60,
+                color: Colors.white,
+              ),
+            ),
+ SizedBox(height: 20),
             Text(
               'Welcome, ${widget.userData['name']}',
               style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
@@ -329,7 +423,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
             SizedBox(height: 40),
             _buildDashboardButton(
               label: 'Give Attendance',
-              onPressed: _isAttendanceActive ? _markAttendance : null,
+              onPressed:
+               
+               _isAttendanceActive ? _markAttendance : null,
             ),
             _buildDashboardButton(
               label: 'Logout',
@@ -391,6 +487,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
   }
 }
 
+
+
+
 class AdminDashboard extends StatefulWidget {
   final String username;
 
@@ -402,10 +501,16 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   String _statusMessage = '';
+  String _csvData = '';
 
   void _triggerAttendance() async {
+    setState(() {
+      _statusMessage = ''; // Clear previous status message
+      _csvData = ''; // Clear previous CSV data
+    });
+
     final response = await http.post(
-      Uri.parse('http://172.21.44.180:5000/trigger-attendance'),
+      Uri.parse('http://192.168.31.50:5000/trigger-attendance'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'admin': widget.username}),
     );
@@ -419,6 +524,82 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _statusMessage = 'Failed to start attendance process. Error: ${response.body}';
       });
     }
+  }
+
+  void _fetchAttendanceCSV() async {
+    setState(() {
+      _statusMessage = '';
+      _csvData = '';
+    });
+
+    final response = await http.get(Uri.parse('http://192.168.31.50:5000/attendance-csv'));
+    if (response.statusCode == 200) {
+      setState(() {
+        _csvData = response.body;
+      });
+    } else {
+      setState(() {
+        _statusMessage = 'Failed to fetch attendance data.';
+      });
+    }
+  }
+ void _sendAttendanceEmail() async {
+  final response = await http.post(
+    Uri.parse('http://192.168.31.50:5000/send-attendance-email'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'adminUsername': widget.username}),
+  );
+
+  if (response.statusCode == 200) {
+    setState(() {
+      _statusMessage = 'Attendance report sent successfully.';
+    });
+  } else {
+    setState(() {
+      _statusMessage = 'Failed to send attendance report.';
+    });
+  }
+}
+
+
+  List<List<String>> _parseCSV(String csvData) {
+    return csvData.split('\n')
+        .where((row) => row.trim().isNotEmpty)
+        .map((line) => line.split(','))
+        .toList();
+  }
+
+  Widget _buildAttendanceTable() {
+    List<List<String>> parsedData = _parseCSV(_csvData);
+    
+    if (parsedData.isEmpty) {
+      return Text('No data available');
+    }
+
+    // Ensure all rows have the same number of columns
+    int columnCount = parsedData[0].length;
+    parsedData = parsedData.where((row) => row.length == columnCount).toList();
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SingleChildScrollView(
+          child: DataTable(
+            headingRowColor: MaterialStateProperty.all(Colors.blue[100]),
+            columns: parsedData[0].map((header) => DataColumn(
+              label: Text(header, style: TextStyle(fontWeight: FontWeight.bold)),
+            )).toList(),
+            rows: parsedData.skip(1).map((row) => DataRow(
+              cells: row.map((cell) => DataCell(Text(cell))).toList(),
+            )).toList(),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -437,27 +618,55 @@ class _AdminDashboardState extends State<AdminDashboard> {
           },
         ),
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('Welcome, Admin ${widget.username}', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-            SizedBox(height: 40),
-            ElevatedButton(
-              onPressed: _triggerAttendance,
-              child: Text('Trigger Attendance'),
-            ),
-            if (_statusMessage.isNotEmpty)
-              Padding(
-                padding: EdgeInsets.only(top: 20),
-                child: Text(_statusMessage),
+      body: SingleChildScrollView(
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircleAvatar(
+                radius: 50,
+                backgroundColor: Colors.blue,
+                child: Icon(
+                  Icons.assignment_ind,
+                  size: 60,
+                  color: Colors.white,
+                ),
               ),
-          ],
+              SizedBox(height: 20),
+              Text('Welcome, Admin ${widget.username}', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+              SizedBox(height: 40),
+              ElevatedButton(
+                onPressed: _triggerAttendance,
+                child: Text('Trigger Attendance'),
+              ),
+              SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _fetchAttendanceCSV,
+                child: Text('Fetch Attendance Data'),
+              ),
+             SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _sendAttendanceEmail,
+                child: Text('Send Attendance Report'),
+              ),
+              if (_statusMessage.isNotEmpty)
+                Padding(
+                  padding: EdgeInsets.only(top: 20),
+                  child: Text(_statusMessage),
+                ),
+              if (_csvData.isNotEmpty)
+                Padding(
+                  padding: EdgeInsets.all(20),
+                  child: _buildAttendanceTable(),
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
+
 
 
 class AttendanceStatusPage extends StatelessWidget {
