@@ -1,3 +1,59 @@
+CREATE DATABASE AMS;
+USE AMS;
+CREATE TABLE AMS (
+    NAME VARCHAR(255) NOT NULL,
+    mail_id VARCHAR(255) PRIMARY KEY,
+    password VARCHAR(255) NOT NULL,
+    roll_number VARCHAR(20) UNIQUE NOT NULL,
+    has_marked BOOLEAN DEFAULT FALSE,
+    role ENUM('S', 'A') NOT NULL DEFAULT 'S'
+);
+CREATE TABLE AttendanceHistory (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    date DATE NOT NULL,
+    NAME VARCHAR(255) NOT NULL,
+    mail_id VARCHAR(255) NOT NULL,
+    roll_number VARCHAR(20) NOT NULL,
+    status BOOLEAN NOT NULL,
+    FOREIGN KEY (mail_id) REFERENCES AMS(mail_id) ON UPDATE CASCADE
+);
+
+
+To update a mail_id, use:
+sql
+UPDATE AMS SET mail_id = 'new_email@example.com' WHERE mail_id = 'old_email@example.com';
+
+
+Insert sample data into the AMS table:
+sql
+INSERT INTO AMS (NAME, mail_id, password, roll_number, role) VALUES
+('John Doe', 'jerinshaji455@gmail.com', 'password123', 'R001', 'S'),
+('Jane Smith', 'jerin_b220336ec@nitc.ac.in', 'securepass456', 'R002', 'S'),
+('Alice Johnson', 'alice.johnson@example.com', 'mypassword789', 'R003', 'S'),
+('Bob Brown', 'bob.brown@example.com', 'pass1234', 'R004', 'S'),
+('Charlie White', 'charlie.white@example.com', 'charliepass567', 'R005', 'S');
+
+
+Insert sample data into the AttendanceHistory table:
+sql
+INSERT INTO AttendanceHistory (date, NAME, mail_id, roll_number, status) VALUES
+(CURDATE(), 'John Doe', 'jerinshaji455@gmail.com', 'R001', 0),
+(CURDATE(), 'Jane Smith', 'jerin_b220336ec@nitc.ac.in', 'R002', 1),
+(CURDATE(), 'Alice Johnson', 'alice.johnson@example.com', 'R003', 0),
+(CURDATE(), 'Bob Brown', 'bob.brown@example.com', 'R004', 0),
+(CURDATE(), 'Charlie White', 'charlie.white@example.com', 'R005', 0);
+
+
+
+
+
+
+
+
+
+
+
+
 ALTER TABLE AMS ADD UNIQUE (mail_id);
 CREATE TABLE IF NOT EXISTS AttendanceHistory (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -8,3 +64,4 @@ CREATE TABLE IF NOT EXISTS AttendanceHistory (
     status BOOLEAN NOT NULL,
     FOREIGN KEY (mail_id) REFERENCES AMS(mail_id)
 );
+
