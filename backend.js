@@ -28,21 +28,27 @@ let timeRemaining = 70;
 const ipAttendance = {};
 
 app.post('/login', (req, res) => {
-    const { email, password } = req.body;
-    db.query('SELECT * FROM AMS WHERE mail_id = ? AND password = ?', [email, password], (err, results) => {
+    const { email, password, selectedRole } = req.body;
+    db.query('SELECT NAME, mail_id, roll_number, role, has_marked FROM AMS WHERE mail_id = ? AND password = ?', [email, password], (err, results) => {
         if (err) {
             console.error('Database query failed: ' + err.stack);
             return res.status(500).json({ message: 'Internal server error' });
         }
         if (results.length > 0) {
-            res.status(200).json({ 
-                message: 'Login successful',
-                userData: {
-                    name: results[0].NAME,
-                    mail_id: results[0].mail_id,
-                    roll_number: results[0].roll_number
-                }
-            });
+            const user = results[0];
+            if (user.role === selectedRole) {
+                res.status(200).json({
+                    message: 'Login successful',
+                    userData: {
+                        name: user.NAME,
+                        mail_id: user.mail_id,
+                        roll_number: user.roll_number,
+                        role: user.role
+                    }
+                });
+            } else {
+                res.status(403).json({ message: 'Access denied. Invalid role selected.' });
+            }
         } else {
             res.status(401).json({ message: 'Invalid login credentials' });
         }
@@ -99,7 +105,7 @@ app.post('/attendance', (req, res) => {
     });
 });
 
-app.post('/trigger-attendance', (req, res) => {
+app.post('/trigger-attendance',  (req, res) => {
     if (isAttendanceActive) {
         return res.status(400).json({ message: 'Attendance process is already active.' });
     }
@@ -151,7 +157,31 @@ app.post('/trigger-attendance', (req, res) => {
     });
 });
 
-
+app.post('/edit-attendance', (req, res) => {
+    const { roll_number, status } = req.body;
+    
+    db.query('UPDATE AttendanceHistory SET status = ? WHERE roll_number = ?', [status ? 1 : 0, roll_number], (err, result) => {
+      if (err) {
+        console.error('Error updating attendance:', err);
+        return res.status(500).json({ message: 'Internal server error' });
+      }
+      
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: 'Student not found' });
+      }
+      
+      // Update the AMS table as well
+      db.query('UPDATE AMS SET has_marked = ? WHERE roll_number = ?', [status ? 1 : 0, roll_number], (err, result) => {
+        if (err) {
+          console.error('Error updating AMS table:', err);
+          return res.status(500).json({ message: 'Internal server error' });
+        }
+        
+        res.status(200).json({ message: 'Attendance updated successfully' });
+      });
+    });
+  });
+  
 app.get('/attendance-status', (req, res) => {
     res.status(200).json({ isActive: isAttendanceActive, timeRemaining });
 });
